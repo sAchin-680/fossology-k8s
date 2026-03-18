@@ -263,6 +263,37 @@ The base layer references the raw manifests, and overlays use JSON patches + ima
 
 ---
 
+## Scheduler Enhancement — Technical Analysis
+
+The FOSSology scheduler (`fo_scheduler`) dispatches agents to hosts listed in `fossology.conf`'s `[HOSTS]` section. Today all hosts live in a single round-robin queue — the scheduler picks the next host with free capacity regardless of agent type. This means a heavyweight scanner like `nomos` might land on a small worker while a lightweight `copyright` scan occupies a large one.
+
+### Key code paths
+
+| Symbol                  | File                         | Role                                                                                                              |
+| ----------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `host_t`                | `src/scheduler/agent/host.h` | Struct: `name`, `address`, `agent_dir`, `max`, `running` — **no agent-type affinity**                             |
+| `host_init()`           | `host.c:48`                  | Allocates a `host_t` from the 3-field config line                                                                 |
+| `get_host()`            | `host.c:144`                 | Iterates `scheduler->host_queue` (GList), returns first host with `max - running >= num` — **agent-type unaware** |
+| `scheduler_update()`    | `scheduler.c:506`            | Dispatch loop — calls `get_host(&scheduler->host_queue, 1)` for the generic case                                  |
+| `agent_create_thread()` | `agent.c:726–780`            | Forks, then `execv("/usr/bin/ssh", host->address, ...)` for remote hosts                                          |
+| `required_host`         | `job.h:54`                   | Existing mechanism to pin a job to one named host (used by `jq_host` DB column)                                   |
+
+### What needs to change
+
+1. **Extend `host_t`** with a `tags` field (NULL-terminated `char**`) so hosts can declare which agent types they prefer.
+2. **New config syntax** — backward-compatible pipe-delimited tags after slot count:
+   ```ini
+   worker-heavy-0 = worker-heavy-0.dns.local /usr/local/etc/fossology 8 | nomos monk
+   worker-light-0 = worker-light-0.dns.local /usr/local/etc/fossology 4 | copyright ojo
+   ```
+   Lines without `|` behave identically to today (host accepts all agent types).
+3. **New `get_host_for(scheduler, agent_type, num)`** — filters the round-robin queue by tag match before checking capacity. Falls back to untagged (universal) hosts.
+4. **Update `scheduler_update()`** to call `get_host_for()` instead of `get_host()` in the generic dispatch path.
+
+A draft patch is in [`scheduler-patch/host.c.diff`](scheduler-patch/host.c.diff) and the full analysis is in [`scheduler-patch/NOTES.md`](scheduler-patch/NOTES.md).
+
+---
+
 ## Future Roadmap — GSoC 2026
 
 This PoC establishes the foundation for the full **"Kubernetes-Native Deployment with Scalable Agent Architecture"** project:
@@ -273,7 +304,8 @@ This PoC establishes the foundation for the full **"Kubernetes-Native Deployment
 | **Phase 2 — Helm + GitOps**   | Helm chart, ArgoCD Application definitions, ConfigMap/Secret templating                   | Planned     |
 | **Phase 3 — Autoscaling**     | KEDA ScaledObject (scale workers on job-queue depth), per-agent-type pod affinity         | Planned     |
 | **Phase 4 — Scheduler Patch** | C-level patch to `fo_scheduler` for per-agent-type `[HOSTS]` groups, host affinity labels | Planned     |
-| **Phase 5 — Long-term**       | Replace SSH dispatch with native Kubernetes Jobs/CronJobs (eliminates SSH entirely)       | Future      |
+
+Phase 4 is the core scheduler enhancement described in the [Technical Analysis](#scheduler-enhancement--technical-analysis) above.
 
 ### Alignment with GSoC acceptance criteria
 

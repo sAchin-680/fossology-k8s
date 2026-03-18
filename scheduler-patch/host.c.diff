@@ -1,0 +1,175 @@
+diff --git a/src/scheduler/agent/host.h b/src/scheduler/agent/host.h
+index abcdef1..1234567 100644
+--- a/src/scheduler/agent/host.h
++++ b/src/scheduler/agent/host.h
+@@ -27,6 +27,8 @@ typedef struct {
+   char* agent_dir;  ///< The location on the host machine where the executables are
+   int max;          ///< The max number of agents that can run on this host
+   int running;      ///< The number of agents currently running on this host
++  char** tags;      ///< NULL-terminated array of agent-type tags (e.g. "nomos", "monk")
++  int    n_tags;    ///< Number of tags (0 = host accepts any agent type)
+ } host_t;
+ 
+ /* ************************************************************************** */
+@@ -34,7 +36,7 @@ typedef struct {
+ /* ************************************************************************** */
+ 
+-host_t* host_init(char* name, char* address, char* agent_dir, int max);
++host_t* host_init(char* name, char* address, char* agent_dir, int max, char** tags, int n_tags);
+ void host_destroy(host_t* h);
+ 
+ /* ************************************************************************** */
+@@ -46,7 +48,8 @@ void host_increase_load(host_t* host);
+ void host_decrease_load(host_t* host);
+ void host_print(host_t* host, GOutputStream* ostr);
+ 
+-host_t* get_host(GList** queue, uint8_t num);
++host_t* get_host(GList** queue, uint8_t num);                                    /* unchanged — kept for compat */
++host_t* get_host_for(scheduler_t* s, const char* agent_type, uint8_t num);       /* NEW */
+ void    print_host_load(GTree* host_list, GOutputStream* ostr);
+ 
+ #endif /* HOST_H_INCLUDE */
+diff --git a/src/scheduler/agent/host.c b/src/scheduler/agent/host.c
+index abcdef2..1234568 100644
+--- a/src/scheduler/agent/host.c
++++ b/src/scheduler/agent/host.c
+@@ -46,7 +46,7 @@ static int print_host_all(gchar* host_name, host_t* host, GOutputStream* ostr)
+  * @param max         The max number of agent that can run on this host
+  * @returns New host
+  */
+-host_t* host_init(char* name, char* address, char* agent_dir, int max)
++host_t* host_init(char* name, char* address, char* agent_dir, int max, char** tags, int n_tags)
+ {
+   host_t* host = g_new0(host_t, 1);
+ 
+@@ -55,6 +55,15 @@ host_t* host_init(char* name, char* address, char* agent_dir, int max)
+   host->agent_dir = g_strdup(agent_dir);
+   host->max = max;
+   host->running = 0;
++  host->n_tags = n_tags;
++  if (n_tags > 0 && tags != NULL) {
++    host->tags = g_new0(char*, n_tags + 1);  /* NULL-terminated */
++    for (int i = 0; i < n_tags; i++)
++      host->tags[i] = g_strdup(tags[i]);
++    host->tags[n_tags] = NULL;
++  } else {
++    host->tags = NULL;
++  }
+ 
+   return host;
+ }
+@@ -67,6 +76,13 @@ void host_destroy(host_t* host)
+   g_free(host->name);
+   g_free(host->address);
+   g_free(host->agent_dir);
++  if (host->tags) {
++    for (int i = 0; i < host->n_tags; i++)
++      g_free(host->tags[i]);
++    g_free(host->tags);
++  }
++  host->tags = NULL;
++  host->n_tags = 0;
+ 
+   host->name = NULL;
+   host->address = NULL;
+@@ -168,3 +184,52 @@ void print_host_load(GTree* host_list, GOutputStream* ostr)
+   g_tree_foreach(host_list, (GTraverseFunc)print_host_all, ostr);
+   g_output_stream_write(ostr, "\nend\n", 5, NULL, NULL);
+ }
++
++/**
++ * @brief Check whether a host is tagged for a given agent type.
++ *
++ * A host with zero tags (n_tags == 0) is considered a "universal" host and
++ * matches any agent type.
++ *
++ * @param host        The host to check
++ * @param agent_type  The agent type string (e.g. "nomos")
++ * @return TRUE if the host can run agents of this type
++ */
++static gboolean host_accepts_agent(const host_t* host, const char* agent_type)
++{
++  if (host->n_tags == 0)
++    return TRUE;  /* no tags → accepts everything (backward compat) */
++
++  for (int i = 0; i < host->n_tags; i++) {
++    if (strcmp(host->tags[i], agent_type) == 0)
++      return TRUE;
++  }
++  return FALSE;
++}
++
++/**
++ * @brief Select a host that can run the given agent type.
++ *
++ * Iterates the round-robin queue and returns the first host that:
++ *   1. Has at least @p num free agent slots, AND
++ *   2. Is tagged for @p agent_type (or has no tags, i.e. universal).
++ *
++ * Falls back to any universal host if no tagged host has capacity.
++ *
++ * @param scheduler   The scheduler (owns host_queue)
++ * @param agent_type  The agent type to dispatch
++ * @param num         Required free slots
++ * @return A suitable host, or NULL if none available
++ */
++host_t* get_host_for(scheduler_t* scheduler, const char* agent_type, uint8_t num)
++{
++  GList*  curr = NULL;
++  host_t* host = NULL;
++
++  for (curr = scheduler->host_queue; curr != NULL; curr = curr->next) {
++    host = curr->data;
++    if (host->max - host->running >= num && host_accepts_agent(host, agent_type))
++      break;
++  }
++  if (curr == NULL)
++    return NULL;
++
++  scheduler->host_queue = g_list_remove(scheduler->host_queue, host);
++  scheduler->host_queue = g_list_append(scheduler->host_queue, host);
++  return host;
++}
+diff --git a/src/scheduler/agent/scheduler.c b/src/scheduler/agent/scheduler.c
+index abcdef3..1234569 100644
+--- a/src/scheduler/agent/scheduler.c
++++ b/src/scheduler/agent/scheduler.c
+@@ -503,7 +503,7 @@ void scheduler_update(scheduler_t* scheduler)
+       }
+       // the generic case, this can run anywhere, find a place
+-      else if((host = get_host(&(scheduler->host_queue), 1)) == NULL)
++      else if((host = get_host_for(scheduler, job->agent_type, 1)) == NULL)
+       {
+         job = NULL;
+         break;
+@@ -907,8 +907,30 @@ void scheduler_config_event(scheduler_t* scheduler, void* unused)
+       continue;
+     }
+ 
+-    sscanf(tmp, "%s %s %d", addbuf, dirbuf, &max);
+-    host = host_init(keys[i], addbuf, dirbuf, max);
++    /* Parse: address agent_dir max [| tag1 tag2 ...] */
++    char* pipe = strchr(tmp, '|');
++    char** tags = NULL;
++    int n_tags = 0;
++
++    if (pipe != NULL) {
++      *pipe = '\0';  /* split at pipe */
++      pipe++;        /* skip past NUL */
++      /* tokenise the tag list */
++      char* saveptr = NULL;
++      char* tok = strtok_r(pipe, " \t", &saveptr);
++      while (tok != NULL && n_tags < 64) {
++        tags = g_renew(char*, tags, n_tags + 1);
++        tags[n_tags++] = tok;  /* points into tmp buffer, copied by host_init */
++        tok = strtok_r(NULL, " \t", &saveptr);
++      }
++    }
++
++    sscanf(tmp, "%s %s %d", addbuf, dirbuf, &max);   /* parse the part before | */
++    host = host_init(keys[i], addbuf, dirbuf, max, tags, n_tags);
++    g_free(tags);  /* host_init g_strdup'd the strings */
++
+     host_insert(host, scheduler);
+     if(TVERB_SCHED)
+     {
