@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: © 2026 FOSSology Contributors
+# SPDX-License-Identifier: GPL-2.0-only
+name: CI — FOSSology K8s PoC
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    e2e:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install kind
+              uses: helm/kind-action@v1
+              with:
+                  install_only: true
+
+            - name: Create kind cluster
+              run: kind create cluster --config kind-config.yaml --name fossology-poc
+
+            - name: Build worker image
+              run: |
+                  docker build --platform linux/amd64 --provenance=false \
+                    --output type=docker -t fossology-worker:poc images/worker/
+
+            - name: Pull FOSSology base image
+              run: docker pull fossology/fossology:latest
+
+            - name: Load images into kind
+              run: |
+                  # Tag with the registry prefix used in manifests so containerd
+                  # resolves the image names without pulling from a real registry.
+                  docker tag fossology/fossology:latest 172.19.0.3:5000/fossology/fossology:latest
+                  docker tag fossology-worker:poc 172.19.0.3:5000/fossology-worker:poc
+                  kind load docker-image 172.19.0.3:5000/fossology/fossology:latest --name fossology-poc
+                  kind load docker-image 172.19.0.3:5000/fossology-worker:poc --name fossology-poc
+
+            - name: Generate SSH keys
+              run: bash scripts/generate-keys.sh
+
+            - name: Apply manifests
+              run: |
+                  kubectl apply -f manifests/namespace.yaml
+                  sleep 1
+                  kubectl apply -f manifests/configmap.yaml
+                  kubectl apply -f manifests/shared-pvc.yaml
+                  kubectl apply -f manifests/networkpolicy.yaml
+                  kubectl apply -f manifests/postgres.yaml
+                  kubectl apply -f manifests/web.yaml
+                  kubectl apply -f manifests/scheduler.yaml
+                  kubectl apply -f manifests/worker-statefulset.yaml
+
+            - name: Wait for pods
+              run: bash scripts/wait-for-ready.sh
+              env:
+                  TIMEOUT: 300s
+
+            - name: Show pod status
+              if: always()
+              run: kubectl get pods -n fossology -o wide
+
+            - name: Generate test data
+              run: bash scripts/generate-test-data.sh
+
+            - name: Run smoke test
+              run: bash scripts/smoke-test.sh
+
+            - name: Collect logs on failure
+              if: failure()
+              run: |
+                  echo "=== Scheduler ==="
+                  kubectl logs deployment/fossology-scheduler -n fossology --tail=100 || true
+                  echo "=== Web ==="
+                  kubectl logs deployment/fossology-web -n fossology --tail=100 || true
+                  echo "=== Worker-0 ==="
+                  kubectl logs fossology-workers-0 -n fossology --tail=100 || true
+                  echo "=== Worker-1 ==="
+                  kubectl logs fossology-workers-1 -n fossology --tail=100 || true
+                  echo "=== Postgres ==="
+                  kubectl logs statefulset/postgres -n fossology --tail=100 || true
+                  echo "=== Events ==="
+                  kubectl get events -n fossology --sort-by='.metadata.creationTimestamp' || true

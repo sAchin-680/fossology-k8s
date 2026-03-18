@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: © 2026 FOSSology Contributors
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# kind cluster configuration for fossology-k8s PoC.
+# Creates a single control-plane node with NodePort mapping so the
+# web UI is accessible at http://localhost:30080/repo without port-forward.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # FOSSology web UI — NodePort 30080 → host 30080
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP

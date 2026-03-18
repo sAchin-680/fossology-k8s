@@ -6,3 +6,6 @@ worker-key.pub
 # Apple Silicon / local dev workarounds — see hack/ for context
 hack/
 
+# Generated test data (recreate with: make test-data)
+test-data/
+

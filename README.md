@@ -7,6 +7,7 @@ FOSSology running on a local [kind](https://kind.sigs.k8s.io/) cluster with sche
 1. **Worker separation works** — agent pods run in their own StatefulSet, fully decoupled from the scheduler
 2. **SSH dispatch over K8s networking** — the scheduler's native `[HOSTS]` mechanism reaches workers via stable DNS, no sidecar or gRPC bridge needed
 3. **End-to-end scans complete** — uploads through the web UI produce license findings (nomos, monk, etc.) executed entirely on remote worker pods
+4. **Production-readiness foundations** — resource limits, liveness/readiness probes, NetworkPolicy, HPA, Kustomize overlays, and CI
 
 ---
 
@@ -16,41 +17,79 @@ FOSSology running on a local [kind](https://kind.sigs.k8s.io/) cluster with sche
 
 - [kind](https://kind.sigs.k8s.io/) and `kubectl`
 - Docker Desktop (or equivalent)
+- GNU Make
 
-### 1. Create the kind cluster
+### One-command setup
 
 ```bash
-kind create cluster --name fossology-poc
+make up
 ```
 
-### 2. Bootstrap everything
+This creates a kind cluster, builds images, generates SSH keys, deploys everything, and waits for all pods to be ready.
+
+### Access the UI
 
 ```bash
-./scripts/bootstrap.sh
-```
-
-This single command:
-
-1. Generates an ED25519 SSH keypair (gitignored, never committed)
-2. Creates the `fossology-ssh-keys` Kubernetes Secret
-3. Builds and loads the `fossology-worker` image into kind
-4. Applies all manifests in dependency order and waits for rollout
-
-### 3. Access the UI
-
-```bash
-kubectl port-forward svc/fossology-web 8080:80 -n fossology
+make port-forward
 ```
 
 Open http://localhost:8080/repo — log in with `fossy` / `fossy`.
 
-### 4. Verify SSH dispatch
+### Run the smoke test
 
 ```bash
+make test
+```
+
+Verifies pod readiness, SSH connectivity, scheduler config, REST API upload+scan, and worker activity.
+
+### Tear down
+
+```bash
+make down
+```
+
+### Manual bootstrap (without Make)
+
+<details>
+<summary>Expand for step-by-step</summary>
+
+```bash
+# 1. Create the kind cluster
+kind create cluster --config kind-config.yaml --name fossology-poc
+
+# 2. Bootstrap everything
+./scripts/bootstrap.sh
+
+# 3. Access the UI
+kubectl port-forward svc/fossology-web 8080:80 -n fossology
+
+# 4. Verify SSH dispatch
 kubectl exec deployment/fossology-scheduler -n fossology -- \
   su -s /bin/sh fossy -c \
   "ssh fossy@fossology-workers-0.fossology-workers.fossology.svc.cluster.local echo OK"
 ```
+
+</details>
+
+### Makefile targets
+
+Run `make help` for the full list:
+
+| Target                | Description                                  |
+| --------------------- | -------------------------------------------- |
+| `make up`             | Create cluster, build, deploy, wait          |
+| `make down`           | Tear down the kind cluster                   |
+| `make test`           | Run end-to-end smoke test                    |
+| `make test-ssh`       | Verify SSH from scheduler → workers          |
+| `make test-dns`       | Check worker DNS resolution                  |
+| `make status`         | Show pod status                              |
+| `make port-forward`   | Forward web UI to localhost:8080             |
+| `make logs-scheduler` | Tail scheduler logs                          |
+| `make logs-worker`    | Tail worker-0 logs                           |
+| `make logs-web`       | Tail web logs                                |
+| `make check-conf`     | Show [HOSTS] from scheduler's fossology.conf |
+| `make clean`          | Tear down + remove generated files           |
 
 ---
 
@@ -142,13 +181,24 @@ Workers are a `StatefulSet` so they get stable DNS names (required for the `[HOS
 ## Repository Structure
 
 ```
-fossology-k8s/
+fossology-k8s-poc/
+├── .github/
+│   └── workflows/
+│       └── ci.yaml                      # GitHub Actions — e2e smoke test
 ├── docs/
 │   ├── fossology_k8s_architecture.svg   # Architecture diagram
 │   └── screenshots/                     # PoC evidence screenshots
 ├── images/
 │   └── worker/
 │       └── Dockerfile                   # fossology base + sshd
+├── kustomize/
+│   ├── base/
+│   │   └── kustomization.yaml           # Base — references manifests/
+│   └── overlays/
+│       ├── dev/
+│       │   └── kustomization.yaml       # Dev — fewer replicas, smaller limits
+│       └── production/
+│           └── kustomization.yaml       # Prod — private registry, HPA, scaled
 ├── manifests/
 │   ├── namespace.yaml
 │   ├── configmap.yaml                   # Db.conf, fossology.conf ([HOSTS])
@@ -156,10 +206,33 @@ fossology-k8s/
 │   ├── postgres.yaml                    # StatefulSet + Service
 │   ├── web.yaml                         # Deployment + Service (port 80)
 │   ├── scheduler.yaml                   # Deployment + init container (SSH setup)
-│   └── worker-statefulset.yaml          # StatefulSet + headless Service (port 22)
-└── scripts/
-    └── bootstrap.sh                     # One-command cluster setup
+│   ├── worker-statefulset.yaml          # StatefulSet + headless Service (port 22)
+│   ├── hpa-workers.yaml                 # HorizontalPodAutoscaler (CPU-based)
+│   └── networkpolicy.yaml               # Per-component ingress rules
+├── scripts/
+│   ├── bootstrap.sh                     # One-command cluster setup
+│   ├── generate-keys.sh                 # SSH keypair + K8s Secret
+│   ├── generate-test-data.sh            # Create tarball with known licenses
+│   ├── smoke-test.sh                    # End-to-end verification
+│   ├── teardown.sh                      # Delete the kind cluster
+│   └── wait-for-ready.sh               # Poll until all pods are Ready
+├── kind-config.yaml                     # kind cluster config (NodePort mapping)
+└── Makefile                             # Developer-friendly targets
 ```
+
+## Kustomize
+
+The `kustomize/` directory provides environment-specific overlays:
+
+```bash
+# Dev (single worker, smaller limits — good for laptops)
+kubectl apply -k kustomize/overlays/dev/
+
+# Production (4 workers, private registry, HPA enabled)
+kubectl apply -k kustomize/overlays/production/
+```
+
+The base layer references the raw manifests, and overlays use JSON patches + image transformers to customize for each environment.
 
 ## Key Design Decisions
 
@@ -176,7 +249,29 @@ fossology-k8s/
 
 - SSH keypair is **gitignored** — regenerate with `ssh-keygen -t ed25519 -f worker-key -N ""`
 - `PasswordAuthentication no` enforced — only pubkey auth accepted on workers
+- **NetworkPolicy** restricts ingress: workers accept SSH only from scheduler, postgres only from FOSSology pods
+- **Resource limits** on all containers prevent noisy-neighbour issues
 - For production: store keys in Vault / SealedSecrets instead of `bootstrap.sh` local keygen
+
+---
+
+## Future Roadmap — GSoC 2026
+
+This PoC establishes the foundation for the full **"Kubernetes-Native Deployment with Scalable Agent Architecture"** project:
+
+| Phase                         | Deliverable                                                                               | Status      |
+| ----------------------------- | ----------------------------------------------------------------------------------------- | ----------- |
+| **Phase 1 — PoC**             | SSH dispatch on Kubernetes, separate worker pods, end-to-end scans                        | ✅ Complete |
+| **Phase 2 — Helm + GitOps**   | Helm chart, ArgoCD Application definitions, ConfigMap/Secret templating                   | Planned     |
+| **Phase 3 — Autoscaling**     | KEDA ScaledObject (scale workers on job-queue depth), per-agent-type pod affinity         | Planned     |
+| **Phase 4 — Scheduler Patch** | C-level patch to `fo_scheduler` for per-agent-type `[HOSTS]` groups, host affinity labels | Planned     |
+| **Phase 5 — Long-term**       | Replace SSH dispatch with native Kubernetes Jobs/CronJobs (eliminates SSH entirely)       | Future      |
+
+### Alignment with GSoC acceptance criteria
+
+> _"A working FOSSology deployment on a local Kubernetes cluster… At least one agent worker pod running separately from the scheduler, with the scheduler successfully dispatching an agent to it via SSH over the Kubernetes pod network."_
+
+This PoC satisfies all criteria with evidence: pod screenshots, SSH dispatch logs, browser scan results, and an automated smoke test that verifies the full pipeline.
 
 ## License
 

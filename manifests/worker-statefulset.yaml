@@ -40,6 +40,19 @@ spec:
             - name: config
               mountPath: /usr/local/etc/fossology/fossology.conf
               subPath: fossology.conf
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: '2'
+              memory: 2Gi
+          livenessProbe:
+            tcpSocket:
+              port: 22
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 5
           readinessProbe:
             tcpSocket:
               port: 22

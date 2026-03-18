@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: © 2026 FOSSology Contributors
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Production overlay — hardened settings for managed Kubernetes clusters.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - ../../manifests/hpa-workers.yaml
+
+# Override image references for a private registry
+images:
+  - name: 172.19.0.3:5000/fossology/fossology
+    newName: registry.example.com/fossology/fossology
+    newTag: '4.5.0'
+  - name: 172.19.0.3:5000/fossology-worker
+    newName: registry.example.com/fossology/worker
+    newTag: '4.5.0'
+
+patches:
+  # Scale workers for production workload
+  - target:
+      kind: StatefulSet
+      name: fossology-workers
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 4
+
+  # Larger resource limits for production
+  - target:
+      kind: Deployment
+      name: fossology-scheduler
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "2Gi"
+
+  - target:
+      kind: StatefulSet
+      name: fossology-workers
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "4"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "4Gi"
