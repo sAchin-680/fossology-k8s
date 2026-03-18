@@ -148,6 +148,14 @@ The FOSSology web UI is accessible at `http://localhost:8080/repo` via port-forw
   <img src="docs/screenshots/web-ui.png" alt="FOSSology Web UI with scan results" width="750"/>
 </p>
 
+### 4. Automated smoke test — 14/14 checks pass
+
+Running `make test` executes a full end-to-end verification suite that validates every layer of the PoC — pod readiness, SSH dispatch, scheduler configuration, REST API upload → scan → completion, and worker activity:
+
+<p align="center">
+  <img src="docs/screenshots/smoke-test.png" alt="Automated smoke test — 14/14 passed" width="750"/>
+</p>
+
 ---
 
 ## Architecture
