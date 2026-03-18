@@ -44,6 +44,7 @@ spec:
               Host *
                 StrictHostKeyChecking no
                 UserKnownHostsFile /dev/null
+                LogLevel ERROR
               SSHEOF
               chmod 600 /home/fossy-ssh/config
               chown 999:999 /home/fossy-ssh/config
@@ -54,8 +55,24 @@ spec:
               cp -a /usr/local/etc/fossology/. /run/fossology-etc/
 
               # Inject worker pods into [HOSTS] section (insert before [REPOSITORY])
-              sed -i '/^\[REPOSITORY\]/i fossology-workers-0.fossology-workers.fossology.svc.cluster.local = \/usr\/local\/lib\/fossology 4\nfossology-workers-1.fossology-workers.fossology.svc.cluster.local = \/usr\/local\/lib\/fossology 4' \
+              # Remove localhost so scheduler never tries to run agents locally
+              sed -i '/^localhost\s*=/d' /run/fossology-etc/fossology.conf
+              sed -i '/^\[REPOSITORY\]/i fossology-workers-0 = fossology-workers-0.fossology-workers.fossology.svc.cluster.local \/usr\/local\/etc\/fossology 4\nfossology-workers-1 = fossology-workers-1.fossology-workers.fossology.svc.cluster.local \/usr\/local\/etc\/fossology 4' \
                 /run/fossology-etc/fossology.conf
+
+              # ── 3. Trim mods-enabled to a minimal set ──────────────────────
+              # The scheduler startup test spawns one QEMU-emulated thread per
+              # (agent × host). With all agents × all hosts the GLib thread pool
+              # SIGSEGVs under emulation.  Keep agents needed for a basic license
+              # scan: ununpack + adj2nest (unpack pipeline), mimetype, nomos, monk
+              # copyright. 7 agents × 2 workers = 14 threads — safe for QEMU.
+              KEEP="nomos ununpack mimetype adj2nest monk copyright deciderjob"
+              for entry in /run/fossology-etc/mods-enabled/*; do
+                mod=$(basename "$entry")
+                keep=0
+                for k in $KEEP; do [ "$mod" = "$k" ] && keep=1 && break; done
+                [ $keep -eq 0 ] && rm -rf "$entry"
+              done
           volumeMounts:
             - name: ssh-staging
               mountPath: /run/ssh-staging
@@ -79,6 +96,12 @@ spec:
               value: fossy
             - name: FOSSOLOGY_DB_PASSWORD
               value: fossy
+            # QEMU x86_64-on-ARM stability: disable GLib slice allocator and
+            # limit malloc arenas to prevent SIGSEGV under emulated threading
+            - name: G_SLICE
+              value: always-malloc
+            - name: MALLOC_ARENA_MAX
+              value: '1'
           readinessProbe:
             tcpSocket:
               port: 24693
