@@ -1,0 +1,3 @@
+# Local arm64/Apple Silicon workarounds — not part of the deployment
+containerd-config.toml
+patch_manifest.py

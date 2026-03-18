@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fossology-scheduler
+  namespace: fossology
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fossology-scheduler
+  template:
+    metadata:
+      labels:
+        app: fossology-scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: 172.19.0.3:5000/fossology/fossology:latest
+          imagePullPolicy: IfNotPresent
+          args: ['scheduler']
+          env:
+            - name: FOSSOLOGY_DB_HOST
+              value: postgres
+            - name: FOSSOLOGY_DB_NAME
+              value: fossology
+            - name: FOSSOLOGY_DB_USER
+              value: fossy
+            - name: FOSSOLOGY_DB_PASSWORD
+              value: fossy
+          readinessProbe:
+            tcpSocket:
+              port: 24693
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+          volumeMounts:
+            - name: repo
+              mountPath: /srv/fossology/repository
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: fossology-repo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler
+  namespace: fossology
+spec:
+  selector:
+    app: fossology-scheduler
+  ports:
+    - port: 24693
+      targetPort: 24693

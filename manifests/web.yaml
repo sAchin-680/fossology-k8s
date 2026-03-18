@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fossology-web
+  namespace: fossology
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fossology-web
+  template:
+    metadata:
+      labels:
+        app: fossology-web
+    spec:
+      containers:
+        - name: web
+          image: 172.19.0.3:5000/fossology/fossology:latest
+          imagePullPolicy: IfNotPresent
+          args: ['web']
+          env:
+            - name: FOSSOLOGY_DB_HOST
+              value: postgres
+            - name: FOSSOLOGY_DB_NAME
+              value: fossology
+            - name: FOSSOLOGY_DB_USER
+              value: fossy
+            - name: FOSSOLOGY_DB_PASSWORD
+              value: fossy
+            - name: FOSSOLOGY_SCHEDULER_HOST
+              value: scheduler
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /repo
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 10
+          volumeMounts:
+            - name: repo
+              mountPath: /srv/fossology/repository
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: fossology-repo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fossology-web
+  namespace: fossology
+spec:
+  selector:
+    app: fossology-web
+  ports:
+    - port: 80
+      targetPort: 80

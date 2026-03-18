@@ -4,14 +4,18 @@ metadata:
   name: fossology-config
   namespace: fossology
 data:
+  # NOTE: entrypoint overwrites Db.conf at startup from env vars; this is kept
+  # for reference only. Format must match entrypoint output (key=value; no spaces).
   Db.conf: |
-    dbname = fossology
-    host = postgres
-    user = fossy
-    password = fossology
+    dbname=fossology;
+    host=postgres;
+    user=fossy;
+    password=fossy;
+    client_encoding=utf8;
   fossology.conf: |
     [FOSSOLOGY]
     port = 24693
+    address = localhost
     depth = 3
     path = /srv/fossology/repository
 

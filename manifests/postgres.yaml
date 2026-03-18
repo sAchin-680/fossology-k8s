@@ -4,7 +4,7 @@ metadata:
   name: fossology-db-secret
   namespace: fossology
 stringData:
-  POSTGRES_PASSWORD: fossology
+  POSTGRES_PASSWORD: fossy
   POSTGRES_USER: fossy
   POSTGRES_DB: fossology
 ---
@@ -26,12 +26,26 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:13
+          image: postgres:16
+          env:
+            - name: POSTGRES_INITDB_ARGS
+              value: '-E SQL_ASCII'
           envFrom:
             - secretRef:
                 name: fossology-db-secret
           ports:
             - containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - fossy
+                - -d
+                - fossology
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 10
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
