@@ -1,3 +1,8 @@
-# Local arm64/Apple Silicon workarounds — not part of the deployment
-containerd-config.toml
-patch_manifest.py
+# SSH keypair — generated locally, loaded into K8s Secret via scripts/bootstrap.sh
+# Never commit private keys; store them in a secrets manager for production.
+worker-key
+worker-key.pub
+
+# Apple Silicon / local dev workarounds — see hack/ for context
+hack/
+
