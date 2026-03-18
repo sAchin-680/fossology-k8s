@@ -1,39 +1,56 @@
 # FOSSology on Kubernetes — Proof of Concept
 
-A working Kubernetes deployment of [FOSSology](https://github.com/fossology/fossology) on a local [kind](https://kind.sigs.k8s.io/) cluster, demonstrating:
+FOSSology running on a local [kind](https://kind.sigs.k8s.io/) cluster with scheduler, web UI, database, and **separate worker pods** — all communicating over SSH through the Kubernetes pod network. Zero patches to FOSSology source code.
 
-- **Web UI** accessible via port-forward
-- **Scheduler** (`fo_scheduler`) running and dispatching scan jobs
-- **Agent worker pods** running separately from the scheduler, receiving work via **SSH over the Kubernetes pod network**
-- **License scans completing end-to-end** against a PostgreSQL database
+## What This Proves
+
+1. **Worker separation works** — agent pods run in their own StatefulSet, fully decoupled from the scheduler
+2. **SSH dispatch over K8s networking** — the scheduler's native `[HOSTS]` mechanism reaches workers via stable DNS, no sidecar or gRPC bridge needed
+3. **End-to-end scans complete** — uploads through the web UI produce license findings (nomos, monk, etc.) executed entirely on remote worker pods
 
 ---
 
-## Architecture
+## Quick Start
 
-<p align="center">
-  <img src="docs/fossology_k8s_architecture.svg" alt="FOSSology K8s Architecture" width="800"/>
-</p>
+### Prerequisites
 
-| Component                   | K8s Resource                    | Role                                                        |
-| --------------------------- | ------------------------------- | ----------------------------------------------------------- |
-| **fossology-web**           | Deployment + ClusterIP Service  | Apache/PHP UI on port 80                                    |
-| **fossology-scheduler**     | Deployment                      | `fo_scheduler` — reads `[HOSTS]`, dispatches agents via SSH |
-| **fossology-workers-{0,1}** | StatefulSet + Headless Service  | `sshd` + all FOSSology agents; receive work from scheduler  |
-| **postgres**                | StatefulSet + ClusterIP Service | PostgreSQL database                                         |
-| **fossology-repo**          | PersistentVolumeClaim (RWX)     | Shared repository storage across web, scheduler, workers    |
+- [kind](https://kind.sigs.k8s.io/) and `kubectl`
+- Docker Desktop (or equivalent)
 
-The scheduler uses FOSSology's built-in SSH dispatch mechanism. For each host listed in `[HOSTS]`, it forks and calls:
+### 1. Create the kind cluster
 
-```c
-// agent.c — simplified
-args[0] = "/usr/bin/ssh";
-args[1] = host->address;   // fossology-workers-0.fossology-workers.fossology.svc.cluster.local
-args[2] = agent_binary_cmd;
-execv(args[0], args);
+```bash
+kind create cluster --name fossology-poc
 ```
 
-Workers are a `StatefulSet` so they get stable DNS names (required for the `[HOSTS]` config). A headless Service resolves worker FQDNs directly to pod IPs.
+### 2. Bootstrap everything
+
+```bash
+./scripts/bootstrap.sh
+```
+
+This single command:
+
+1. Generates an ED25519 SSH keypair (gitignored, never committed)
+2. Creates the `fossology-ssh-keys` Kubernetes Secret
+3. Builds and loads the `fossology-worker` image into kind
+4. Applies all manifests in dependency order and waits for rollout
+
+### 3. Access the UI
+
+```bash
+kubectl port-forward svc/fossology-web 8080:80 -n fossology
+```
+
+Open http://localhost:8080/repo — log in with `fossy` / `fossy`.
+
+### 4. Verify SSH dispatch
+
+```bash
+kubectl exec deployment/fossology-scheduler -n fossology -- \
+  su -s /bin/sh fossy -c \
+  "ssh fossy@fossology-workers-0.fossology-workers.fossology.svc.cluster.local echo OK"
+```
 
 ---
 
@@ -94,6 +111,34 @@ The FOSSology web UI is accessible at `http://localhost:8080/repo` via port-forw
 
 ---
 
+## Architecture
+
+<p align="center">
+  <img src="docs/fossology_k8s_architecture.svg" alt="FOSSology K8s Architecture" width="800"/>
+</p>
+
+| Component                   | K8s Resource                    | Role                                                        |
+| --------------------------- | ------------------------------- | ----------------------------------------------------------- |
+| **fossology-web**           | Deployment + ClusterIP Service  | Apache/PHP UI on port 80                                    |
+| **fossology-scheduler**     | Deployment                      | `fo_scheduler` — reads `[HOSTS]`, dispatches agents via SSH |
+| **fossology-workers-{0,1}** | StatefulSet + Headless Service  | `sshd` + all FOSSology agents; receive work from scheduler  |
+| **postgres**                | StatefulSet + ClusterIP Service | PostgreSQL database                                         |
+| **fossology-repo**          | PersistentVolumeClaim (RWX)     | Shared repository storage across web, scheduler, workers    |
+
+The scheduler uses FOSSology's built-in SSH dispatch mechanism. For each host listed in `[HOSTS]`, it forks and calls:
+
+```c
+// agent.c — simplified
+args[0] = "/usr/bin/ssh";
+args[1] = host->address;   // fossology-workers-0.fossology-workers.fossology.svc.cluster.local
+args[2] = agent_binary_cmd;
+execv(args[0], args);
+```
+
+Workers are a `StatefulSet` so they get stable DNS names (required for the `[HOSTS]` config). A headless Service resolves worker FQDNs directly to pod IPs.
+
+---
+
 ## Repository Structure
 
 ```
@@ -115,50 +160,6 @@ fossology-k8s/
 └── scripts/
     └── bootstrap.sh                     # One-command cluster setup
 ```
-
-## Quick Start
-
-### Prerequisites
-
-- [kind](https://kind.sigs.k8s.io/) and `kubectl`
-- Docker Desktop (or equivalent)
-
-### 1. Create the kind cluster
-
-```bash
-kind create cluster --name fossology-poc
-```
-
-### 2. Bootstrap everything
-
-```bash
-./scripts/bootstrap.sh
-```
-
-This single command:
-
-1. Generates an ED25519 SSH keypair (gitignored, never committed)
-2. Creates the `fossology-ssh-keys` Kubernetes Secret
-3. Builds and loads the `fossology-worker` image into kind
-4. Applies all manifests in dependency order and waits for rollout
-
-### 3. Access the UI
-
-```bash
-kubectl port-forward svc/fossology-web 8080:80 -n fossology
-```
-
-Open http://localhost:8080/repo — log in with `fossy` / `fossy`.
-
-### 4. Verify SSH dispatch
-
-```bash
-kubectl exec deployment/fossology-scheduler -n fossology -- \
-  su -s /bin/sh fossy -c \
-  "ssh fossy@fossology-workers-0.fossology-workers.fossology.svc.cluster.local echo OK"
-```
-
----
 
 ## Key Design Decisions
 
