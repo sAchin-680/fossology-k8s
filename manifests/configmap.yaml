@@ -21,3 +21,5 @@ data:
 
     [HOSTS]
     localhost = localhost AGENT_DIR 10
+    fossology-workers-0.fossology-workers.fossology.svc.cluster.local = /usr/local/lib/fossology 4
+    fossology-workers-1.fossology-workers.fossology.svc.cluster.local = /usr/local/lib/fossology 4

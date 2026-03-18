@@ -13,6 +13,58 @@ spec:
       labels:
         app: fossology-scheduler
     spec:
+      # Single init container handles two setup tasks before fo_scheduler starts:
+      #
+      # 1. SSH key — the fossology entrypoint drops to fossy (uid=999) via
+      #    setuid() before forking SSH agents. K8s mounts Secrets as root-owned
+      #    files, so we copy the private key into an emptyDir and chown it to
+      #    fossy so it is readable after the privilege drop.
+      #
+      # 2. fossology.conf — the entrypoint runs `sed -i` on fossology.conf to
+      #    update the 'address' field. ConfigMap subPath mounts are read-only
+      #    bind mounts, so sed -i fails. We instead copy the image's original
+      #    fossology.conf into a writable emptyDir, patch in the worker [HOSTS]
+      #    entries, and mount that emptyDir directory over /usr/local/etc/fossology/
+      #    so the entrypoint can freely modify it.
+      initContainers:
+        - name: setup-scheduler
+          image: 172.19.0.3:5000/fossology/fossology:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+
+              # ── 1. SSH private key ──────────────────────────────────────────
+              cp /run/ssh-staging/id_ed25519 /home/fossy-ssh/id_ed25519
+              chmod 600 /home/fossy-ssh/id_ed25519
+              chown 999:999 /home/fossy-ssh/id_ed25519
+              # Disable strict host key checking — workers have ephemeral host keys
+              cat > /home/fossy-ssh/config <<'SSHEOF'
+              Host *
+                StrictHostKeyChecking no
+                UserKnownHostsFile /dev/null
+              SSHEOF
+              chmod 600 /home/fossy-ssh/config
+              chown 999:999 /home/fossy-ssh/config
+
+              # ── 2. fossology.conf in writable emptyDir ─────────────────────
+              # Copy everything from the image's etc dir so the entrypoint can
+              # overwrite files freely (Db.conf, fossology.conf address patch).
+              cp -a /usr/local/etc/fossology/. /run/fossology-etc/
+
+              # Inject worker pods into [HOSTS] section (insert before [REPOSITORY])
+              sed -i '/^\[REPOSITORY\]/i fossology-workers-0.fossology-workers.fossology.svc.cluster.local = \/usr\/local\/lib\/fossology 4\nfossology-workers-1.fossology-workers.fossology.svc.cluster.local = \/usr\/local\/lib\/fossology 4' \
+                /run/fossology-etc/fossology.conf
+          volumeMounts:
+            - name: ssh-staging
+              mountPath: /run/ssh-staging
+              readOnly: true
+            - name: fossy-ssh-home
+              mountPath: /home/fossy-ssh
+            - name: fossology-etc
+              mountPath: /run/fossology-etc
+
       containers:
         - name: scheduler
           image: 172.19.0.3:5000/fossology/fossology:latest
@@ -36,10 +88,29 @@ spec:
           volumeMounts:
             - name: repo
               mountPath: /srv/fossology/repository
+            # fossy's ~/.ssh — populated by init container with mode-600 key
+            - name: fossy-ssh-home
+              mountPath: /home/fossy/.ssh
+            # Writable emptyDir (with patched fossology.conf) replaces the
+            # image's /usr/local/etc/fossology so the entrypoint can sed it
+            - name: fossology-etc
+              mountPath: /usr/local/etc/fossology
+
       volumes:
         - name: repo
           persistentVolumeClaim:
             claimName: fossology-repo
+        # Secret mounted read-only for init container only
+        - name: ssh-staging
+          secret:
+            secretName: fossology-ssh-keys
+            defaultMode: 0400
+        # emptyDir for fossy's .ssh (key + config, correctly permissioned)
+        - name: fossy-ssh-home
+          emptyDir: {}
+        # emptyDir for /usr/local/etc/fossology (writable, pre-populated by init)
+        - name: fossology-etc
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
