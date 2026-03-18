@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fossology-config
+  namespace: fossology
+data:
+  Db.conf: |
+    dbname = fossology
+    host = postgres
+    user = fossy
+    password = fossology
+  fossology.conf: |
+    [FOSSOLOGY]
+    port = 24693
+    depth = 3
+    path = /srv/fossology/repository
+
+    [HOSTS]
+    localhost = localhost AGENT_DIR 10
