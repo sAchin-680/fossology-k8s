@@ -1,0 +1,107 @@
+# createNamespace — when true, Helm will render a Namespace resource for .Release.Namespace.
+# Set to false when the namespace is pre-created (e.g. by the cluster admin or ArgoCD).
+createNamespace: true
+
+# ── Image ──────────────────────────────────────────────────────────────────
+# image.registry  — container registry prefix (e.g. docker.io, registry.example.com)
+# image.tag       — tag applied to fossology/fossology and fossology-worker images
+# image.pullPolicy — IfNotPresent | Always | Never
+image:
+  registry: docker.io
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ── PostgreSQL ───────────────────────────────────────────────────────────────
+postgres:
+  image: postgres:16
+  storage: 5Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: '1'
+      memory: 1Gi
+
+# ── Web UI ───────────────────────────────────────────────────────────────────
+web:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '1'
+      memory: 1Gi
+
+# ── Workers ──────────────────────────────────────────────────────────────────
+# workers.replicas  — initial pod count; HPA overrides when keda.enabled=false
+# workers.maxAgents — max concurrent fo_scheduler agents per worker pod
+# workers.sshPort   — SSH port exposed on each worker pod (default 22)
+workers:
+  replicas: 2
+  maxAgents: 4
+  sshPort: 22
+  # image — override the worker image reference for local/kind deploys.
+  # Leave empty to auto-derive from image.registry/fossology-worker:image.tag.
+  # Example for the PoC: fossology-worker:latest
+  image: ''
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 2Gi
+
+# ── FOSSology application ─────────────────────────────────────────────────────
+fossology:
+  db:
+    # host — leave empty ("") to auto-derive from the chart's postgres Service
+    # name (<release>-postgres). Set explicitly to use an external PostgreSQL.
+    host: ''
+    name: fossology
+    user: fossy
+    # WARNING: change this before deploying to production
+    password: fossy
+    # existingSecret — name of a pre-created Secret containing POSTGRES_DB,
+    # POSTGRES_USER, and POSTGRES_PASSWORD keys. When set, the chart skips
+    # creating its own Secret and password above is ignored.
+    existingSecret: ''
+  repository:
+    # storageClass — set to your RWX-capable storage class name (NFS, CephFS, etc.)
+    # Leave empty ("") to use the cluster default storage class.
+    storageClass: ''
+    size: 10Gi
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  host: fossology.example.com
+  className: ''
+  # annotations: {}
+
+# ── KEDA (event-driven autoscaling) ──────────────────────────────────────────
+# When keda.enabled=false, a standard HorizontalPodAutoscaler is created instead.
+# When keda.enabled=true, skip HPA and manage KEDA ScaledObject separately.
+keda:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  # CPU utilization threshold (%) used by HPA when keda.enabled=false
+  threshold: 70
+
+# ── ArgoCD ────────────────────────────────────────────────────────────────────
+# Reserved for future ArgoCD Application manifest generation.
+argocd:
+  enabled: false

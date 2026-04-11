@@ -1,0 +1,16 @@
+apiVersion: v2
+name: fossology
+description: FOSSology on Kubernetes with scalable SSH-dispatched agent workers
+type: application
+version: 0.1.0
+appVersion: '4.4.0'
+keywords:
+  - fossology
+  - license-scanning
+  - compliance
+  - spdx
+maintainers:
+  - name: FOSSology Contributors
+    url: https://fossology.github.io
+sources:
+  - https://github.com/fossology/fossology

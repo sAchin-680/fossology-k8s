@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fossology.fullname" . }}-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      {{- include "fossology.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "fossology.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+        app: fossology-web
+    spec:
+      containers:
+        - name: web
+          image: {{ include "fossology.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["web"]
+          env:
+            - name: FOSSOLOGY_DB_HOST
+              value: {{ include "fossology.dbHost" . }}
+            - name: FOSSOLOGY_DB_NAME
+              value: {{ .Values.fossology.db.name }}
+            - name: FOSSOLOGY_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fossology.dbSecretName" . }}
+                  key: POSTGRES_USER
+            - name: FOSSOLOGY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fossology.dbSecretName" . }}
+                  key: POSTGRES_PASSWORD
+            - name: FOSSOLOGY_SCHEDULER_HOST
+              value: {{ printf "%s-scheduler" (include "fossology.fullname" .) }}
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /repo
+              port: 80
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /repo
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 10
+          volumeMounts:
+            - name: repo
+              mountPath: /srv/fossology/repository
+      volumes:
+        - name: repo
+          persistentVolumeClaim:
+            claimName: {{ include "fossology.repoPVCName" . }}

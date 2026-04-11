@@ -1,0 +1,41 @@
+# HPA for worker pods — only rendered when keda.enabled=false.
+# When KEDA is enabled, remove this HPA and deploy a ScaledObject separately.
+# Requires metrics-server in the cluster:
+#   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+{{- if not .Values.keda.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "fossology.workerServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ include "fossology.workerServiceName" . }}
+  minReplicas: {{ .Values.keda.minReplicas }}
+  maxReplicas: {{ .Values.keda.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.keda.threshold }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+{{- end }}

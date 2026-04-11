@@ -1,0 +1,73 @@
+# fo-postinstall Job — runs after chart installation to set up the FOSSology
+# database schema and default data. Runs as a Helm post-install hook so that
+# the PostgreSQL StatefulSet is created before this job executes.
+#
+# The job waits for PostgreSQL to accept connections before invoking
+# fo-postinstall, using pg_isready as an init-container gate.
+#
+# NOTE: The SSH keypair Secret ({{ include "fossology.sshSecretName" . }})
+# must exist before running helm install. Generate it with:
+#   bash scripts/generate-keys.sh
+#   kubectl create secret generic <name>-ssh-keys \
+#     --from-file=id_ed25519=worker-key \
+#     --from-literal=authorized_keys="$(cat worker-key.pub)" \
+#     -n <namespace>
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "fossology.fullname" . }}-postinstall
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postinstall
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  activeDeadlineSeconds: 300
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "fossology.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postinstall
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait until PostgreSQL is accepting connections before running fo-postinstall
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fossology.dbSecretName" . }}
+                  key: POSTGRES_USER
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h {{ include "fossology.dbHost" . }} -U "$PGUSER"; do
+                echo "Waiting for PostgreSQL..."; sleep 3
+              done
+      containers:
+        - name: fo-postinstall
+          image: {{ include "fossology.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c", "fo-postinstall"]
+          env:
+            - name: FOSSOLOGY_DB_HOST
+              value: {{ include "fossology.dbHost" . }}
+            - name: FOSSOLOGY_DB_NAME
+              value: {{ .Values.fossology.db.name }}
+            - name: FOSSOLOGY_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fossology.dbSecretName" . }}
+                  key: POSTGRES_USER
+            - name: FOSSOLOGY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fossology.dbSecretName" . }}
+                  key: POSTGRES_PASSWORD

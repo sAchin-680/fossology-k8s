@@ -1,0 +1,20 @@
+# Headless Service — gives each worker pod a stable DNS name:
+# <release>-workers-<ordinal>.<release>-workers.<namespace>.svc.cluster.local
+# The scheduler's init container injects these FQDNs into fossology.conf [HOSTS].
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fossology.workerServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  clusterIP: None  # headless — no VIP, direct pod DNS
+  selector:
+    {{- include "fossology.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+  ports:
+    - port: {{ .Values.workers.sshPort }}
+      targetPort: {{ .Values.workers.sshPort }}
+      name: ssh

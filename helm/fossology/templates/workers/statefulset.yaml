@@ -1,0 +1,92 @@
+# Worker StatefulSet — SSH-accessible fossology agent execution nodes.
+# Pod DNS naming: <statefulset>-<ordinal>.<headless-svc>.<ns>.svc.cluster.local
+# e.g. fossology-workers-0.fossology-workers.fossology.svc.cluster.local
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "fossology.workerServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  serviceName: {{ include "fossology.workerServiceName" . }}
+  replicas: {{ .Values.workers.replicas }}
+  selector:
+    matchLabels:
+      {{- include "fossology.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "fossology.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+        app: fossology-worker
+    spec:
+      initContainers:
+        # Copy authorized_keys from the Secret mount and fix ownership/permissions
+        # so sshd can operate with default StrictModes (no StrictModes=no override needed).
+        - name: setup-ssh
+          image: {{ include "fossology.workerImage" . }}
+          securityContext:
+            runAsUser: 0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              cp /tmp/ssh-keys/authorized_keys /home/fossy/.ssh/authorized_keys
+              chown fossy:fossy /home/fossy/.ssh/authorized_keys
+              chmod 0600 /home/fossy/.ssh/authorized_keys
+          volumeMounts:
+            - name: ssh-keys
+              mountPath: /tmp/ssh-keys
+            - name: ssh-home
+              mountPath: /home/fossy/.ssh
+      containers:
+        - name: worker
+          image: {{ include "fossology.workerImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.workers.sshPort }}
+              name: ssh
+          volumeMounts:
+            # SSH authorized_keys — copied with fossy ownership and 0600 perms by initContainer
+            - name: ssh-home
+              mountPath: /home/fossy/.ssh
+            # Shared repository storage — same PVC as web + scheduler
+            - name: repo
+              mountPath: /srv/fossology/repository
+            # Database config — agents use this to connect to PostgreSQL
+            - name: config
+              mountPath: /usr/local/etc/fossology/Db.conf
+              subPath: Db.conf
+            # fossology.conf — workers run agents locally (localhost entry only)
+            - name: config
+              mountPath: /usr/local/etc/fossology/fossology.conf
+              subPath: fossology.conf
+          resources:
+            {{- toYaml .Values.workers.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.workers.sshPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.workers.sshPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: ssh-keys
+          secret:
+            secretName: {{ include "fossology.sshSecretName" . }}
+        - name: ssh-home
+          emptyDir: {}
+        - name: repo
+          persistentVolumeClaim:
+            claimName: {{ include "fossology.repoPVCName" . }}
+        - name: config
+          configMap:
+            name: {{ include "fossology.fullname" . }}-config

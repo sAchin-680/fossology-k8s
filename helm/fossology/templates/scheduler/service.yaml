@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fossology.fullname" . }}-scheduler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+spec:
+  selector:
+    {{- include "fossology.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler
+  ports:
+    - port: 24693
+      targetPort: 24693
+      name: scheduler
