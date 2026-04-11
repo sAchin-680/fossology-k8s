@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # Named "postgres" to match the default FOSSOLOGY_DB_HOST value and to
+  # remain compatible with the fossology.db.host value in values.yaml.
+  # If you rename this release, update fossology.db.host accordingly.
+  name: {{ include "fossology.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  selector:
+    {{- include "fossology.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres

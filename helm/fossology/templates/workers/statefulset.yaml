@@ -1,0 +1,75 @@
+# Worker StatefulSet — SSH-accessible fossology agent execution nodes.
+# Pod DNS naming: <statefulset>-<ordinal>.<headless-svc>.<ns>.svc.cluster.local
+# e.g. fossology-workers-0.fossology-workers.fossology.svc.cluster.local
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "fossology.workerServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  serviceName: {{ include "fossology.workerServiceName" . }}
+  replicas: {{ .Values.workers.replicas }}
+  selector:
+    matchLabels:
+      {{- include "fossology.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "fossology.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+        app: fossology-worker
+    spec:
+      containers:
+        - name: worker
+          image: {{ include "fossology.workerImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.workers.sshPort }}
+              name: ssh
+          volumeMounts:
+            # Public key — sshd reads this to authenticate the scheduler's private key
+            - name: ssh-keys
+              mountPath: /home/fossy/.ssh/authorized_keys
+              subPath: authorized_keys
+            # Shared repository storage — same PVC as web + scheduler
+            - name: repo
+              mountPath: /srv/fossology/repository
+            # Database config — agents use this to connect to PostgreSQL
+            - name: config
+              mountPath: /usr/local/etc/fossology/Db.conf
+              subPath: Db.conf
+            # fossology.conf — workers run agents locally (localhost entry only)
+            - name: config
+              mountPath: /usr/local/etc/fossology/fossology.conf
+              subPath: fossology.conf
+          resources:
+            {{- toYaml .Values.workers.resources | nindent 12 }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.workers.sshPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.workers.sshPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+      volumes:
+        - name: ssh-keys
+          secret:
+            secretName: {{ include "fossology.sshSecretName" . }}
+            # 0644 = owner rw, group r, world r.  StrictModes=no in sshd_config
+            # so the root-owned mount is accepted for authorized_keys.
+            defaultMode: 0644
+        - name: repo
+          persistentVolumeClaim:
+            claimName: {{ include "fossology.repoPVCName" . }}
+        - name: config
+          configMap:
+            name: {{ include "fossology.fullname" . }}-config

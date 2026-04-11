@@ -1,0 +1,22 @@
+# Shared ReadWriteMany PVC used by web, scheduler, and all worker pods.
+# Requires a storage class that supports RWX access mode (NFS, CephFS, etc.).
+# For kind / local dev, set fossology.repository.storageClass: "" and
+# create a matching PersistentVolume manually (hostPath or local).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "fossology.repoPVCName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  {{- if .Values.fossology.repository.storageClass }}
+  storageClassName: {{ .Values.fossology.repository.storageClass | quote }}
+  {{- else }}
+  storageClassName: ""
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.fossology.repository.size }}

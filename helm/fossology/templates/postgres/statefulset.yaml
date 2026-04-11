@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "fossology.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "fossology.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: {{ include "fossology.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "fossology.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        {{- include "fossology.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: postgres
+        # Legacy label retained so NetworkPolicy podSelectors kept in both
+        # the original manifests and this chart match without change.
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: POSTGRES_INITDB_ARGS
+              value: "-E SQL_ASCII"
+          envFrom:
+            - secretRef:
+                name: {{ include "fossology.dbSecretName" . }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.fossology.db.user }}
+                - -d
+                - {{ .Values.fossology.db.name }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.fossology.db.user }}
+                - -d
+                - {{ .Values.fossology.db.name }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 10
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.postgres.storageClass }}
+        storageClassName: {{ .Values.postgres.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
