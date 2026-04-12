@@ -1,0 +1,98 @@
+# ── prod-values.yaml ─────────────────────────────────────────────────────────
+# Four-worker production environment.
+# KEDA event-driven autoscaling (4–12 workers), HTTPS ingress with TLS,
+# cert-manager ClusterIssuer, and generous resource limits.
+#
+# Prerequisites:
+#   - cert-manager installed with a ClusterIssuer named "letsencrypt-prod"
+#   - KEDA operator installed in the cluster
+#   - An ingress controller (nginx) with a public LoadBalancer IP
+#   - RWX-capable StorageClass (e.g. NFS, CephFS) set in:
+#       fossology.repository.storageClass
+
+image:
+  # kind PoC: images live in the local registry. Replace for real prod.
+  registry: 172.19.0.2:5000
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ── Workers ──────────────────────────────────────────────────────────────────
+workers:
+  # kind PoC: worker image is custom-built, not on Docker Hub.
+  image: 172.19.0.2:5000/fossology-worker:poc
+  replicas: 4 # initial count; KEDA overrides at runtime
+  resources:
+    requests:
+      cpu: '1'
+      memory: 1Gi
+    limits:
+      cpu: '4'
+      memory: 4Gi
+
+# ── Web UI ───────────────────────────────────────────────────────────────────
+web:
+  replicas: 1 # kind PoC: reduced from 2 to fit single-node cluster
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler:
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: '2'
+      memory: 2Gi
+
+# ── PostgreSQL ───────────────────────────────────────────────────────────────
+postgres:
+  storage: 50Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 2Gi
+
+# ── Repository PVC ───────────────────────────────────────────────────────────
+# kind PoC: uses default 'standard' StorageClass. Replace with an RWX class
+# (e.g. nfs-client, cephfs) for real production multi-replica deployments.
+fossology:
+  repository:
+    storageClass: 'standard'
+    size: 10Gi
+
+# ── Ingress — HTTPS with cert-manager TLS ────────────────────────────────────
+ingress:
+  enabled: true
+  host: fossology.example.com
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: '2048m'
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '600'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '600'
+  tls:
+    enabled: true
+    # cert-manager populates this Secret automatically from the ClusterIssuer
+    secretName: fossology-tls
+
+# ── KEDA — event-driven autoscaling, 4–12 worker replicas ────────────────────
+# Install KEDA before the first sync:
+#   helm repo add kedacore https://kedacore.github.io/charts
+#   helm install keda kedacore/keda -n keda --create-namespace
+#
+# When keda.enabled=true the HPA template is suppressed and KEDA manages
+# scaling via a ScaledObject deployed separately (not part of this chart).
+keda:
+  enabled: true
+  minReplicas: 4
+  maxReplicas: 12
+  threshold: 70

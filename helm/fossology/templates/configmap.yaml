@@ -13,7 +13,7 @@ data:
     dbname={{ .Values.fossology.db.name }};
     host={{ include "fossology.dbHost" . }};
     user={{ .Values.fossology.db.user }};
-    password={{ .Values.fossology.db.password }};
+    password=;
     client_encoding=utf8;
 
   # Worker-facing fossology.conf — mounted into worker pods at runtime.

@@ -19,4 +19,4 @@ spec:
   {{- end }}
   resources:
     requests:
-      storage: {{ .Values.fossology.repository.size }}
+      storage: {{ .Values.fossology.repository.size | quote }}

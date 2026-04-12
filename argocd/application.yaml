@@ -1,0 +1,73 @@
+# ArgoCD ApplicationSet — FOSSology multi-environment deployment
+#
+# Generates one Application per environment (dev / staging / prod).
+# Requires ArgoCD >= 2.6 for multi-source support ($values ref pattern).
+#
+# Pre-requisites before sync:
+#   1. SSH keypair Secret must exist in each target namespace:
+#        kubectl create secret generic fossology-ssh-keys \
+#          --from-file=id_ed25519=worker-key \
+#          --from-literal=authorized_keys="$(cat worker-key.pub)" \
+#          -n <namespace>
+#   2. For prod TLS: cert-manager + a ClusterIssuer named "letsencrypt-prod"
+#
+# Environment → namespace mapping:
+#   dev     → fossology-dev       (1 worker, minimal resources)
+#   staging → fossology-staging   (2 workers, medium resources, HTTP ingress)
+#   prod    → fossology            (4 workers, large resources, KEDA + TLS)
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: fossology
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - env: dev
+            namespace: fossology-dev
+            revision: feat/argocd-manifests
+          - env: staging
+            namespace: fossology-staging
+            revision: feat/argocd-manifests
+          - env: prod
+            namespace: fossology
+            revision: main
+  template:
+    metadata:
+      name: fossology-{{env}}
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: fossology
+        app.kubernetes.io/instance: fossology-{{env}}
+        environment: '{{env}}'
+    spec:
+      project: default
+
+      # Multi-source: source 1 is the Helm chart; source 2 is a ref-only
+      # source that exposes the repo root as $values so valueFiles paths
+      # can point outside the chart directory.
+      sources:
+        - repoURL: https://github.com/sAchin-680/fossology-k8s.git
+          targetRevision: '{{revision}}'
+          path: helm/fossology
+          helm:
+            releaseName: fossology
+            valueFiles:
+              - $values/argocd/{{env}}-values.yaml
+
+        - repoURL: https://github.com/sAchin-680/fossology-k8s.git
+          targetRevision: '{{revision}}'
+          ref: values # exposes repo root as $values for valueFiles above
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+
+      syncPolicy:
+        automated:
+          prune: true # delete resources removed from git
+          selfHeal: true # revert out-of-band changes
+        syncOptions:
+          - CreateNamespace=true # create namespace if absent
+          - ServerSideApply=true # avoids annotation size limits on large objects

@@ -77,7 +77,7 @@ The StatefulSet pod FQDN pattern is:
   <name>-<ordinal>.<workerServiceName>.<namespace>.svc.cluster.local
 */}}
 {{- define "fossology.workerServiceName" -}}
-{{- printf "%s-workers" (include "fossology.fullname" .) }}
+{{- printf "%s-workers" (include "fossology.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
@@ -88,7 +88,7 @@ from the release's postgres Service name so out-of-box deploys work correctly.
 {{- if .Values.fossology.db.host -}}
 {{- .Values.fossology.db.host -}}
 {{- else -}}
-{{- printf "%s-postgres" (include "fossology.fullname" .) -}}
+{{- printf "%s-postgres" (include "fossology.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 {{- end }}
 
@@ -96,19 +96,19 @@ from the release's postgres Service name so out-of-box deploys work correctly.
 Name of the shared database Secret.
 */}}
 {{- define "fossology.dbSecretName" -}}
-{{- printf "%s-db" (include "fossology.fullname" .) }}
+{{- printf "%s-db" (include "fossology.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Name of the SSH keypair Secret.
 */}}
 {{- define "fossology.sshSecretName" -}}
-{{- printf "%s-ssh-keys" (include "fossology.fullname" .) }}
+{{- printf "%s-ssh-keys" (include "fossology.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Name of the shared repository PersistentVolumeClaim.
 */}}
 {{- define "fossology.repoPVCName" -}}
-{{- printf "%s-repo" (include "fossology.fullname" .) }}
+{{- printf "%s-repo" (include "fossology.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}

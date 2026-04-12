@@ -1,0 +1,74 @@
+# ── dev-values.yaml ──────────────────────────────────────────────────────────
+# Single-worker development environment.
+# Designed for a small cluster (kind, k3s, single-node cloud instance).
+# No ingress, minimal resources, HPA floor = 1 replica.
+
+image:
+  # kind PoC: images are loaded into the local registry at 172.19.0.2:5000.
+  # Replace with your registry for non-kind deployments.
+  registry: 172.19.0.2:5000
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# ── Workers ──────────────────────────────────────────────────────────────────
+workers:
+  # kind PoC: custom-built image not on Docker Hub; override for other envs.
+  image: 172.19.0.2:5000/fossology-worker:poc
+  replicas: 1
+  resources:
+    requests:
+      cpu: 125m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Web UI ───────────────────────────────────────────────────────────────────
+web:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+
+# ── PostgreSQL ───────────────────────────────────────────────────────────────
+postgres:
+  storage: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+# ── Repository PVC ───────────────────────────────────────────────────────────
+fossology:
+  repository:
+    size: 5Gi
+
+# ── Ingress — disabled in dev ─────────────────────────────────────────────────
+ingress:
+  enabled: false
+
+# ── HPA — floor at 1 replica, ceiling at 2 ───────────────────────────────────
+# KEDA is off; vanilla HPA is used. Override minReplicas to 1 so the HPA
+# doesn't scale back up to the default minimum of 2.
+keda:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 2
+  threshold: 80

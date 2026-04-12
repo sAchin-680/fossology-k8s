@@ -29,6 +29,8 @@ spec:
           env:
             - name: POSTGRES_INITDB_ARGS
               value: "-E SQL_ASCII"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
                 name: {{ include "fossology.dbSecretName" . }}
