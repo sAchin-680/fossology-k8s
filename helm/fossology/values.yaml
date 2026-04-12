@@ -81,7 +81,15 @@ ingress:
   enabled: false
   host: fossology.example.com
   className: ''
-  # annotations: {}
+  # annotations — merged into Ingress metadata.annotations as-is.
+  # Example for cert-manager:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  annotations: {}
+  tls:
+    enabled: false
+    # secretName — TLS Secret name; cert-manager populates this automatically
+    # when the cluster-issuer annotation is present.
+    secretName: fossology-tls
 
 # ── KEDA (event-driven autoscaling) ──────────────────────────────────────────
 # When keda.enabled=false, a standard HorizontalPodAutoscaler is created instead.

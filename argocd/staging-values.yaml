@@ -1,0 +1,79 @@
+# ── staging-values.yaml ──────────────────────────────────────────────────────
+# Two-worker staging environment.
+# HTTP ingress enabled (no TLS). HPA active, no KEDA.
+# Resource limits are moderate — enough to catch OOM and CPU issues before prod.
+
+image:
+  # kind PoC: images are loaded into the local registry at 172.19.0.2:5000.
+  # Replace with your registry for non-kind deployments.
+  registry: 172.19.0.2:5000
+  tag: latest
+  pullPolicy: Always # always pull on each pod start to pick up image updates
+
+# ── Workers ──────────────────────────────────────────────────────────────────
+workers:
+  # kind PoC: custom-built image not on Docker Hub; override for other envs.
+  image: 172.19.0.2:5000/fossology-worker:poc
+  replicas: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: '1'
+      memory: 1Gi
+
+# ── Web UI ───────────────────────────────────────────────────────────────────
+web:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler:
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# ── PostgreSQL ───────────────────────────────────────────────────────────────
+postgres:
+  storage: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Repository PVC ───────────────────────────────────────────────────────────
+fossology:
+  repository:
+    size: 20Gi
+
+# ── Ingress — HTTP, no TLS ───────────────────────────────────────────────────
+ingress:
+  enabled: true
+  host: fossology-staging.example.com
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: '512m'
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '300'
+  tls:
+    enabled: false
+
+# ── HPA — 2–4 replicas, CPU-based ────────────────────────────────────────────
+keda:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  threshold: 70
