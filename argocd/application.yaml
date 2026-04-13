@@ -26,10 +26,13 @@ spec:
         elements:
           - env: dev
             namespace: fossology-dev
+            revision: feat/argocd-manifests
           - env: staging
             namespace: fossology-staging
+            revision: feat/argocd-manifests
           - env: prod
             namespace: fossology
+            revision: main
   template:
     metadata:
       name: fossology-{{env}}
@@ -46,7 +49,7 @@ spec:
       # can point outside the chart directory.
       sources:
         - repoURL: https://github.com/sAchin-680/fossology-k8s.git
-          targetRevision: feat/argocd-manifests
+          targetRevision: '{{revision}}'
           path: helm/fossology
           helm:
             releaseName: fossology
@@ -54,7 +57,7 @@ spec:
               - $values/argocd/{{env}}-values.yaml
 
         - repoURL: https://github.com/sAchin-680/fossology-k8s.git
-          targetRevision: feat/argocd-manifests
+          targetRevision: '{{revision}}'
           ref: values # exposes repo root as $values for valueFiles above
 
       destination:

@@ -8,12 +8,13 @@ metadata:
 data:
   # NOTE: the FOSSology entrypoint overwrites Db.conf at container startup
   # from FOSSOLOGY_DB_* environment variables (sourced from the Secret).
-  # This copy is kept for reference and as a fallback.
+  # Password is intentionally omitted here — it is injected at runtime via
+  # the FOSSOLOGY_DB_PASSWORD env var sourced from the fossology-db Secret.
   Db.conf: |
     dbname={{ .Values.fossology.db.name }};
     host={{ include "fossology.dbHost" . }};
     user={{ .Values.fossology.db.user }};
-    password={{ .Values.fossology.db.password }};
+    password=;
     client_encoding=utf8;
 
   # Worker-facing fossology.conf — mounted into worker pods at runtime.

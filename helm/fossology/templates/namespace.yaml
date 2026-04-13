@@ -1,6 +1,8 @@
+{{- if .Values.createNamespace }}
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .Release.Namespace }}
   labels:
     {{- include "fossology.labels" . | nindent 4 }}
+{{- end }}

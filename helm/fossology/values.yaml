@@ -1,3 +1,10 @@
+# ── Namespace ────────────────────────────────────────────────────────────────
+# createNamespace: true — let Helm create the release namespace via the
+# namespace.yaml template. Set to false when the namespace is managed
+# externally (e.g. by ArgoCD with CreateNamespace=true syncOption, or by
+# cluster admins) to avoid a redundant resource or permission errors.
+createNamespace: true
+
 # ── Image ──────────────────────────────────────────────────────────────────
 # image.registry  — container registry prefix (e.g. docker.io, registry.example.com)
 # image.tag       — tag applied to fossology/fossology and fossology-worker images

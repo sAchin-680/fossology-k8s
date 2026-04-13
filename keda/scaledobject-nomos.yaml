@@ -1,0 +1,65 @@
+# KEDA ScaledObject — placeholder for a future nomos-specific worker pool.
+#
+# Nomos is FOSSology's license scanner. When a dedicated nomos StatefulSet is introduced
+# (e.g. fossology-nomos-workers), this ScaledObject will scale it independently of the
+# general worker pool, allowing nomos jobs to scale without displacing other agent types.
+#
+# Current status: NOT DEPLOYED — the fossology-nomos-workers StatefulSet does not yet exist.
+# This file is a template to be activated when that workload is created.
+#
+# To activate:
+#   1. Create a fossology-nomos-workers StatefulSet (mirroring workers/statefulset.yaml
+#      but with a nomos-optimised resource profile and the nomos agent only).
+#   2. Ensure fossology-keda-db-conn Secret exists (see scaledobject-workers.yaml).
+#   3. Update the query below to filter specifically for nomos jobs:
+#        SELECT COUNT(*) FROM jobqueue
+#        WHERE jq_endtime IS NULL AND jq_schedinfo IS NULL
+#        AND jq_type = 'nomos'
+#      (Adjust jq_type value to match the nomos agent identifier in your FOSSology DB.)
+#   4. Remove this comment block and apply with:
+#        kubectl apply -f keda/scaledobject-nomos.yaml
+
+---
+# TriggerAuthentication is shared with scaledobject-workers.yaml.
+# If fossology-db-trigger-auth already exists, skip this block.
+# apiVersion: keda.sh/v1alpha1
+# kind: TriggerAuthentication
+# metadata:
+#   name: fossology-db-trigger-auth
+#   namespace: fossology
+# spec:
+#   secretTargetRef:
+#     - parameter: connection
+#       name: fossology-keda-db-conn
+#       key: connection
+
+---
+# apiVersion: keda.sh/v1alpha1
+# kind: ScaledObject
+# metadata:
+#   name: fossology-nomos-workers
+#   namespace: fossology
+#   labels:
+#     app.kubernetes.io/name: fossology
+#     app.kubernetes.io/component: nomos-worker
+#     app.kubernetes.io/managed-by: keda
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: StatefulSet
+#     name: fossology-nomos-workers
+#   minReplicaCount: 1
+#   maxReplicaCount: 8
+#   pollingInterval: 15
+#   cooldownPeriod: 60
+#   triggers:
+#     - type: postgresql
+#       metadata:
+#         query: >-
+#           SELECT COUNT(*) FROM jobqueue
+#           WHERE jq_endtime IS NULL AND jq_schedinfo IS NULL
+#           AND jq_type = 'nomos'
+#         targetQueryValue: "5"
+#         activationTargetQueryValue: "1"
+#       authenticationRef:
+#         name: fossology-db-trigger-auth

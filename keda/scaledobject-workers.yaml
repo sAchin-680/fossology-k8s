@@ -1,0 +1,88 @@
+# KEDA ScaledObject — scales fossology-workers StatefulSet based on pending job queue depth.
+#
+# How scaling works:
+#   KEDA queries the jobqueue table every pollingInterval seconds. The result (pending job count)
+#   is divided by targetQueryValue (5) to get the desired replica count. With 10 pending jobs
+#   and threshold=5, KEDA targets 2 replicas; with 40 pending jobs it targets 8 (maxReplicaCount).
+#
+# Prerequisites:
+#   1. KEDA operator installed in the cluster:
+#        helm repo add kedacore https://kedacore.github.io/charts
+#        helm install keda kedacore/keda --namespace keda --create-namespace
+#
+#   2. The fossology Helm chart must be deployed first (creates fossology-db Secret and
+#      the fossology-workers StatefulSet in the fossology namespace).
+#
+#   3. Create the KEDA connection Secret with the PostgreSQL connection string:
+#        DB_PASSWORD=$(kubectl -n fossology get secret fossology-db \
+#          -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)
+#        kubectl -n fossology create secret generic fossology-keda-db-conn \
+#          --from-literal=connection="host=fossology-postgres port=5432 \
+#            user=fossy password=${DB_PASSWORD} dbname=fossology sslmode=disable"
+#
+#   If you use an external PostgreSQL (fossology.db.host set in values.yaml), replace
+#   "fossology-postgres" above with that hostname.
+#
+# Note on StatefulSet scaling:
+#   KEDA supports StatefulSet as a scaleTargetRef from v2.7+. Ensure your KEDA version
+#   meets this requirement before applying.
+
+---
+# TriggerAuthentication — wires the PostgreSQL connection string from the keda-specific
+# Secret into the ScaledObject trigger without exposing credentials in the manifest.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: fossology-db-trigger-auth
+  namespace: fossology
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: fossology-keda-db-conn
+      key: connection
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fossology-workers
+  namespace: fossology
+  labels:
+    app.kubernetes.io/name: fossology
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/managed-by: keda
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: fossology-workers
+
+  # Keep at least 1 worker running so the scheduler always has somewhere to send jobs.
+  minReplicaCount: 1
+  maxReplicaCount: 8
+
+  # How often KEDA re-evaluates the trigger query (seconds).
+  pollingInterval: 15
+
+  # After a scale-down event, wait this many seconds before scaling down again.
+  # Prevents thrashing when the queue empties and refills quickly.
+  cooldownPeriod: 60
+
+  triggers:
+    - type: postgresql
+      metadata:
+        # Count jobs that are queued but not yet running:
+        #   jq_endtime IS NULL     — job has not finished (or been cancelled)
+        #   jq_schedinfo IS NULL   — job has not been picked up by the scheduler yet
+        query: >-
+          SELECT COUNT(*) FROM jobqueue
+          WHERE jq_endtime IS NULL AND jq_schedinfo IS NULL
+        # Scale up when the number of pending jobs per worker exceeds this threshold.
+        # With 1 worker: scale at 6+ pending jobs (→ 2 workers).
+        # With 2 workers: scale at 11+ pending jobs (→ 3 workers), and so on.
+        targetQueryValue: "5"
+        # Do not scale above minReplicaCount until at least 1 pending job exists.
+        # Prevents premature scale-up on an empty queue at startup.
+        activationTargetQueryValue: "1"
+      authenticationRef:
+        name: fossology-db-trigger-auth

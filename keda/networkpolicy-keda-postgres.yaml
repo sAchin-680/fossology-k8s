@@ -1,0 +1,33 @@
+# NetworkPolicy — allows the KEDA operator (keda namespace) to connect to
+# the fossology PostgreSQL pod on port 5432 for ScaledObject trigger polling.
+#
+# The existing fossology-postgres-ingress NetworkPolicy only permits pods
+# within the fossology namespace. KEDA runs in its own namespace (keda), so
+# an explicit cross-namespace allow is required.
+#
+# Apply alongside scaledobject-workers.yaml:
+#   kubectl apply -f keda/networkpolicy-keda-postgres.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fossology-postgres-keda-ingress
+  namespace: fossology
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: postgres
+      app.kubernetes.io/instance: fossology
+      app.kubernetes.io/name: fossology
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keda
+          podSelector:
+            matchLabels:
+              app: keda-operator
+      ports:
+        - port: 5432
+          protocol: TCP
